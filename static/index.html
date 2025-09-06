@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI内容策略分析工具</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: "Microsoft YaHei", sans-serif;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 0 20px;
+        }
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+            margin-bottom: 30px;
+        }
+        .input-group {
+            margin-bottom: 25px;
+        }
+        .input-group label {
+            display: block;
+            font-weight: bold;
+            color: #34495e;
+            margin-bottom: 8px;
+        }
+        textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #bdc3c7;
+            border-radius: 6px;
+            resize: vertical;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        #promptInput {
+            height: 120px;
+        }
+        #notesInput {
+            height: 220px;
+        }
+        .btn-group {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 25px;
+        }
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        #submitBtn {
+            background-color: #3498db;
+            color: white;
+        }
+        #submitBtn:disabled {
+            background-color: #bdc3c7;
+            cursor: not-allowed;
+        }
+        #clearBtn {
+            background-color: #e74c3c;
+            color: white;
+        }
+        #fillExampleBtn {
+            background-color: #2ecc71;
+            color: white;
+        }
+        .result-section {
+            border: 1px solid #bdc3c7;
+            border-radius: 6px;
+            padding: 20px;
+            background-color: #f8f9fa;
+        }
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .result-header h2 {
+            font-size: 16px;
+            color: #2c3e50;
+        }
+        #progress {
+            color: #3498db;
+            font-weight: bold;
+        }
+        #resultContent {
+            min-height: 200px;
+            padding: 15px;
+            background-color: white;
+            border-radius: 4px;
+            border: 1px solid #bdc3c7;
+            white-space: pre-wrap; /* 保留换行和空格 */
+            font-size: 14px;
+            color: #2c3e50;
+        }
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(52, 152, 219, 0.3);
+            border-radius: 50%;
+            border-top-color: #3498db;
+            animation: spin 1s ease-in-out infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .error {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+        .complete {
+            color: #2ecc71;
+            font-weight: bold;
+        }
+        .note-item {
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 1px dashed #bdc3c7;
+        }
+        .note-item:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>AI内容策略分析工具</h1>
+
+        <!-- 提示词输入区 -->
+        <div class="input-group">
+            <label for="promptInput">AI提示词（默认已包含维度提取要求，可补充自定义规则）</label>
+            <textarea id="promptInput" placeholder="例如：提取结果需排除重复内容，面向人群需细分年龄段...">从笔记标题和内容中，提取「提及产品、核心概念、沟通场景、产品卖点、面向人群」5个维度，每个维度用数组存储（无则为空数组）；概述需严格控制在20字以内，概括笔记的营销核心。</textarea>
+        </div>
+
+        <!-- 笔记数据输入区 -->
+        <div class="input-group">
+            <label for="notesInput">笔记JSON数据（格式参考示例，支持多条）</label>
+            <textarea id="notesInput" placeholder='例如：[{"noteId":"1","title":"...","content":"..."},{"noteId":"2","title":"...","content":"..."}]'></textarea>
+        </div>
+
+        <!-- 操作按钮组 -->
+        <div class="btn-group">
+            <button id="fillExampleBtn">填充示例数据</button>
+            <button id="submitBtn">提交分析（流式返回）</button>
+            <button id="clearBtn">清空结果</button>
+        </div>
+
+        <!-- 结果展示区 -->
+        <div class="result-section">
+            <div class="result-header">
+                <h2>分析结果</h2>
+                <span id="progress"></span>
+            </div>
+            <div id="resultContent">点击「提交分析」开始处理，结果将实时展示在这里...</div>
+        </div>
+    </div>
+
+    <script>
+        // DOM元素获取
+        const promptInput = document.getElementById('promptInput');
+        const notesInput = document.getElementById('notesInput');
+        const submitBtn = document.getElementById('submitBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const fillExampleBtn = document.getElementById('fillExampleBtn');
+        const progressElem = document.getElementById('progress');
+        const resultContent = document.getElementById('resultContent');
+
+        // 示例笔记数据
+        const exampleNotes = [
+            {
+                "noteId": "66ce9693000000001d039d7c",
+                "title": "低卡哄嘴零食分享‼️完全没有罪恶感",
+                "content": "#低卡零食 #徐福记 #山姆 #休闲零食 #办公室小零食 #零食推荐 #小红书爆款美食"
+            },
+            {
+                "noteId": "66ce9693000000001d039d7d",
+                "title": "高效控糖饮食法，轻松减脂不挨饿",
+                "content": "#健康饮食 #控糖 #减脂 #办公室午餐 #瘦身秘籍"
+            }
+        ];
+
+        // 填充示例数据
+        fillExampleBtn.addEventListener('click', () => {
+            notesInput.value = JSON.stringify(exampleNotes, null, 2); // 格式化JSON，便于编辑
+        });
+
+        // 清空结果
+        clearBtn.addEventListener('click', () => {
+            resultContent.innerHTML = '点击「提交分析」开始处理，结果将实时展示在这里...';
+            progressElem.innerHTML = '';
+            submitBtn.disabled = false;
+        });
+
+        // 提交分析（核心：SSE连接）
+        submitBtn.addEventListener('click', async () => {
+            // 1. 输入校验
+            const prompt = promptInput.value.trim();
+            let notes = [];
+            try {
+                notes = JSON.parse(notesInput.value.trim());
+                if (!Array.isArray(notes) || notes.length === 0) {
+                    alert('笔记数据必须是非空数组！');
+                    return;
+                }
+                // 校验单条笔记格式
+                const isValidNote = notes.every(note => 
+                    note.noteId && note.title && note.content
+                );
+                if (!isValidNote) {
+                    alert('每条笔记必须包含noteId、title、content字段！');
+                    return;
+                }
+            } catch (e) {
+                alert('笔记JSON格式错误！请检查语法（例如：逗号、引号）');
+                return;
+            }
+
+            // 2. 初始化状态
+            submitBtn.disabled = true;
+            resultContent.innerHTML = '';
+            progressElem.innerHTML = '<span class="loading"></span> 分析中...';
+
+            // 3. 建立SSE连接（流式接收数据）
+            try {
+                // 构造请求参数
+                const requestData = {
+                    prompt: prompt,
+                    notes: notes,
+                    options: {
+                        stream: true,
+                        timeout: 30000,
+                        retryCount: 2
+                    }
+                };
+
+                // 注意：SSE需用GET/POST，这里通过fetch发送POST并处理流
+                const response = await fetch('http://localhost:3000/v1/notes/analysis', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(requestData),
+                    signal: AbortSignal.timeout(135000) // 前端超时控制（比后端多5s）
+                });
+                // 检查响应状态
+                if (!response.ok) {
+                    throw new Error(`后端错误：${response.status} ${response.statusText}`);
+                }
+
+                // 处理流式响应（SSE格式：data: {JSON}\n\n）
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder('utf-8');
+                let result = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    // 解码并分割SSE数据（可能包含多个分片）
+                    
+                    const chunk = decoder.decode(value, { stream: true });
+                    const sseChunks = chunk.split('\n\n').filter(item => item.trim());
+
+                    // 逐个处理SSE分片
+                    sseChunks.forEach(sseChunk => {
+                        const dataStr = sseChunk.replace(/^data: /, '').trim();
+                        if (!dataStr) return;
+
+                        try {
+                            const data = JSON.parse(dataStr);
+                            updateUI(data); // 更新进度和结果
+                        } catch (e) {
+                            resultContent.innerHTML += `<p class="error">数据解析错误：${dataStr}</p >`;
+                        }
+                    });
+                }
+            } catch (error) {
+                // 错误处理
+                submitBtn.disabled = false;
+                progressElem.innerHTML = '<span class="error">处理失败</span>';
+                resultContent.innerHTML = `<p class="error">错误信息：${error.message}</p >`;
+            }
+        });
+
+        // 更新UI（根据SSE数据类型处理）
+        function updateUI(data) {
+            const { type, data: chunkData, progress } = data;
+
+            // 1. 更新进度
+            progressElem.innerHTML = `进度：${progress}%`;
+
+            // 2. 处理不同类型数据
+            switch (type) {
+                case 'chunk':
+                    // 分片数据：如果是笔记结果，格式化展示；否则仅显示进度
+                    if (chunkData && chunkData.noteId) {
+                        const noteResult = `
+                            <div class="note-item">
+                                <p><strong>笔记ID：</strong>${chunkData.noteId}</p >
+                                <p><strong>营销概述：</strong>${chunkData.概述}</p >
+                                <p><strong>详细分析：</strong></p >
+                                <p>- 提及产品：${JSON.stringify(chunkData.详细分析['提及产品'])}</p >
+                                <p>- 核心概念：${JSON.stringify(chunkData.详细分析['核心概念'])}</p >
+                                <p>- 沟通场景：${JSON.stringify(chunkData.详细分析['沟通场景'])}</p >
+                                <p>- 产品卖点：${JSON.stringify(chunkData.详细分析['产品卖点'])}</p >
+                                <p>- 面向人群：${JSON.stringify(chunkData.详细分析['面向人群'])}</p >
+                            </div>
+                        `;
+                        resultContent.innerHTML += noteResult;
+                    }
+                    break;
+
+                case 'complete':
+                    // 分析完成
+                    submitBtn.disabled = false;
+                    progressElem.innerHTML = '<span class="complete">分析完成</span>';
+                    resultContent.innerHTML += '<p class="complete">✅ 所有笔记分析已完成！</p >';
+                    break;
+
+                case 'error':
+                    // 错误信息
+                    submitBtn.disabled = false;
+                    progressElem.innerHTML = '<span class="error">处理失败</span>';
+                    resultContent.innerHTML += `<p class="error">❌ 错误：${chunkData}</p >`;
+                    break;
+            }
+        }
+    </script>
+</body>
+</html>
